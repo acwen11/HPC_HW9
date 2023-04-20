@@ -1,0 +1,3 @@
+# Use sinteractive to run these. You need to add the argument --gres=gpu:1
+
+sinteractive --gres=gpu:1

@@ -53,18 +53,18 @@ __global__
 {
   int ix = blockIdx.x * blockDim.x + threadIdx.x;
 	int iy = blockIdx.y * blockDim.y + threadIdx.y;
-  int stride = blockDim.x * gridDim.x;
+  // int stride = blockDim.x * gridDim.x;
   const int n = gfs.n;
   const gpu_fp dx2 = gfs.dx2;
   const gpu_fp dy2 = gfs.dy2;
   const gpu_fp idx2 = gfs.idx2;
   const gpu_fp idy2 = gfs.idy2;
   
-  const int i = (iy - 1) * stride + ix; // TODO: Is this valid?
+  const int i = iy * n + ix; // TODO: Is this valid?
 	const int ip1 = i + 1;
 	const int im1 = i - 1;
-	const int jp1 = i + stride;
-	const int jm1 = i - stride;
+	const int jp1 = i + n;
+	const int jm1 = i - n;
   if (index < n-1 && index > 0)
   {
     gfs.u_new[i] =  (0.5 * idx2 * idy2) * (dy2 * (gfs.u[ip1] + gfs.u[im1]) + dx2 * (gfs.u[jp1] + gfs.u[jm1]) - dx2 * dy2 * gfs.src[i]);
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
   gfs_managed.dy2 = dy * dy;
   gfs_managed.idy2 = 1.0 / dy / dy;
 
-  // initialize x and y arrays on the host
+  // initialize x and y arrays on the host TODO
 	for (int j = 0; j < N; j++) {
 		for (int i = 0; i < N; i++) {
 			const gpu_fp x = i * dx;
@@ -147,28 +147,28 @@ int main(int argc, char **argv)
 		}
 	}
 
-  int blockSize = 256;
-  int numBlocks = (N + blockSize - 1) / blockSize;
+  dim3 blockSize(256, 256);
+  dim3 numBlocks((N + blockSize.x - 1) / blockSize.x, (N + blockSize.y - 1) / blocksize.y);
 
   const double t_start = get_time();
    
   
-  printf("numBlocks = %d, blockSize = %d, totalThreads=%d, N=%d\n", numBlocks, blockSize, numBlocks * blockSize, N);
+  // printf("numBlocks = %d, blockSize = %d, totalThreads=%d, N=%d\n", numBlocks, blockSize, numBlocks * blockSize, N);
   
   int its = 0;
   for (;;)
   {
-    for (int j = 0; j < 1000; j++)
+    for (int j = 0; j < 100; j++) //j was originally 1000, setting to 100 for testing
     {
       jacobi <<<numBlocks, blockSize>>> (gfs_managed);
       copy <<<numBlocks, blockSize>>> (gfs_managed);
     }
-    error_check <<<numBlocks, blockSize>>> (gfs_managed);
+    //error_check <<<numBlocks, blockSize>>> (gfs_managed);
     its ++ ;
     CUDA_CHECK(cudaDeviceSynchronize());
-    const double error  = l2_error(gfs_managed);
-    printf("%d %20.16e\n", its, error);
-    if (error < 1.0e-9) break;
+    //const double error  = l2_error(gfs_managed);
+    //printf("%d %20.16e\n", its, error);
+    //if (error < 1.0e-9) break;
   }
 
 
@@ -179,12 +179,17 @@ int main(int argc, char **argv)
 
 
    
-  printf("%d iterations of grid size %d took %fs\n",its, N,  t_end - t_start);
-  for (int i = 0; i < N; i++)
-  {
-    const double x = i * dx;
-    printf("%20.16e %20.16e\n",x, gfs_managed.u[i]);
-  }
+  printf("%d iterations of grid size %d ^2 took %fs\n",its, N,  t_end - t_start);
+	for (int j = 0; j < N; j++)
+	{
+		for (int i = 0; i < N; i++)
+		{
+			const double x = i * dx;
+			const double y = j * dy;
+			const double idx = j * N + i
+			printf("%20.16e %20.16e %20.16e\n",x, y, gfs_managed.u[idx]);
+		}
+	}
 
   // Free memory
   CUDA_CHECK(cudaFree(gfs_managed.u));

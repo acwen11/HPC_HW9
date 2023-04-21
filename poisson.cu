@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <sys/time.h>  // needed for timing
 
-// Solving a 1-D Poisson problem using Jacobi iterations.
+// Solving a 2-D Poisson problem using Jacobi iterations.
 // This version of the code uses kernel level synchronization
 
 
@@ -37,7 +37,9 @@ struct GFS
 {
   int n;
   gpu_fp dx2;
+  gpu_fp dy2;
   gpu_fp idx2;
+  gpu_fp idy2;
   gpu_fp *u;
   gpu_fp *u_new;
   gpu_fp *src;
@@ -47,17 +49,25 @@ struct GFS
 static double l2_error(struct GFS gfs);
 
 __global__
- void gauss_seidel (struct GFS gfs)
+ void jacobi(struct GFS gfs)
 {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  //int stride = blockDim.x * gridDim.x;
+  int ix = blockIdx.x * blockDim.x + threadIdx.x;
+	int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  int stride = blockDim.x * gridDim.x;
   const int n = gfs.n;
   const gpu_fp dx2 = gfs.dx2;
+  const gpu_fp dy2 = gfs.dy2;
+  const gpu_fp idx2 = gfs.idx2;
+  const gpu_fp idy2 = gfs.idy2;
   
-  const int i = index;
+  const int i = (iy - 1) * stride + ix; // TODO: Is this valid?
+	const int ip1 = i + 1;
+	const int im1 = i - 1;
+	const int jp1 = i + stride;
+	const int jm1 = i - stride;
   if (index < n-1 && index > 0)
   {
-    gfs.u_new[i] =  (gfs.u[i+1] + gfs.u[i-1] - dx2 * gfs.src[i]) * 0.5 ;
+    gfs.u_new[i] =  (0.5 * idx2 * idy2) * (dy2 * (gfs.u[ip1] + gfs.u[im1]) + dx2 * (gfs.u[jp1] + gfs.u[jm1]) - dx2 * dy2 * gfs.src[i]);
   }
 }
 
@@ -105,32 +115,39 @@ static double l2_error(struct GFS gfs)
 
 int main(int argc, char **argv)
 {
-  const int N = 1<<10;
+  const int N = 1<<5;
 
   struct GFS gfs_managed;
 
  // const gpu_fp t_final = atof(argv[1]);
 
-  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u), N*sizeof(gpu_fp)));
-  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u_new), N*sizeof(gpu_fp)));
-  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.src), N*sizeof(gpu_fp)));
-  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.error), N*sizeof(gpu_fp)));
+  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u), N*N*sizeof(gpu_fp)));
+  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u_new), N*N*sizeof(gpu_fp)));
+  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.src), N*N*sizeof(gpu_fp)));
+  CUDA_CHECK(cudaMallocManaged(&(gfs_managed.error), N*N*sizeof(gpu_fp)));
 
   const gpu_fp dx = 1.0 / (N-1);
-  gfs_managed.n = N;
+  const gpu_fp dy = 1.0 / (N-1);
+  gfs_managed.n = N * N;
   gfs_managed.dx2 = dx * dx;
   gfs_managed.idx2 = 1.0 / dx / dx;
+  gfs_managed.dy2 = dy * dy;
+  gfs_managed.idy2 = 1.0 / dy / dy;
 
   // initialize x and y arrays on the host
-  for (int i = 0; i < N; i++) {
-    const gpu_fp x = i * dx;
-    gfs_managed.src[i] = exp(-(x-0.5)*(x-0.5)*50);
-    gfs_managed.u[i] = 0;
-    gfs_managed.u_new[i] = 0;
-    gfs_managed.error[i] = 0;
-  }
+	for (int j = 0; j < N; j++) {
+		for (int i = 0; i < N; i++) {
+			const gpu_fp x = i * dx;
+			const gpu_fp y = j * dy;
+			const int idx = j * N + i;
+			gfs_managed.src[idx] = exp(-(x-0.5)*(x-0.5)*50);
+			gfs_managed.u[idx] = 0;
+			gfs_managed.u_new[idx] = 0;
+			gfs_managed.error[idx] = 0;
+		}
+	}
 
-  int blockSize =256;
+  int blockSize = 256;
   int numBlocks = (N + blockSize - 1) / blockSize;
 
   const double t_start = get_time();
@@ -143,7 +160,7 @@ int main(int argc, char **argv)
   {
     for (int j = 0; j < 1000; j++)
     {
-      gauss_seidel <<<numBlocks, blockSize>>> (gfs_managed);
+      jacobi <<<numBlocks, blockSize>>> (gfs_managed);
       copy <<<numBlocks, blockSize>>> (gfs_managed);
     }
     error_check <<<numBlocks, blockSize>>> (gfs_managed);

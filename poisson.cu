@@ -51,43 +51,29 @@ static double l2_error(struct GFS gfs);
 __global__
 void jacobi(struct GFS gfs)
 {
-  int ix = blockIdx.x * blockDim.x + threadIdx.x;//index_x
-  int iy = blockIdx.y * blockDim.y + threadIdx.y;//index_y
-  int stride_x = blockDim.x * gridDim.x;//
-  int stride_y = blockDim.y * gridDim.y;//
+  int ix = blockIdx.x * blockDim.x + threadIdx.x;
+  int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  // int stride_x = blockDim.x * gridDim.x;
+  // int stride_y = blockDim.y * gridDim.y;
   const int n = gfs.n;
   const gpu_fp dx2 = gfs.dx2;
   const gpu_fp dy2 = gfs.dy2;
   const gpu_fp idx2 = gfs.idx2;
   const gpu_fp idy2 = gfs.idy2;
-  const int nx = gfs.nx//
-  const int ny = gfs.ny//	 
+  const int nx = gfs.nx;
+  const int ny = gfs.ny; 
 
  
-  const int i = iy * n + ix; // TODO: Is this valid?
+  const int i = iy * nx + ix; 
 	const int ip1 = i + 1;
 	const int im1 = i - 1;
-	const int jp1 = i + n; 
-	const int jm1 = i - n;
-  if (i < n-1 && i > 0)//this accounts for ghost points and index likely needs to be changed to ix
+	const int jp1 = i + nx; 
+	const int jm1 = i - nx;
+
+  if ((ix < nx - 1 && ix > 0) && (iy < ny - 1 && iy > 0)) // 2D Boundaries
   {
     gfs.u_new[i] =  (0.5 * idx2 * idy2) * (dy2 * (gfs.u[ip1] + gfs.u[im1]) + dx2 * (gfs.u[jp1] + gfs.u[jm1]) - dx2 * dy2 * gfs.src[i]);
   }
-
-  for(int j = iy; j < ny - 1; j += stride_y)
-  {
-	  if(j == 0) continue;
-		for(int i = ix; i < nx - 1; i += stride_x)
-    {
-		  if(i == 0) continue;
-		  gfs.u_new[i + j * nx] = (dy2 * (gfs.u[i + 1 + j * nx] + gfs.u[i - 1 + j * nx]) + dx2 * (gfs.u[i + (j + 1) * nx] + gfs.u[i + (j - 1) * nx] - gfs.src[i + j * nx] * dx2 * dy2)) * (.5 * idx2 * idy2);
-		  gfs.u[i + j * nx] = gfs.u_new[i + j * nx];
-    }
-	}
-	//we also have to make sure we have the same numebr of threads as points in the x direction, and same for the y
-	//4/18 lecture from 11:30-24:44
-
-   __syncthreads(); //AV: is this enough for synchronization?
 }	
 
 
@@ -154,11 +140,11 @@ int main(int argc, char **argv)
   CUDA_CHECK(cudaMallocManaged(&(gfs_managed.error), N*N*sizeof(gpu_fp)));
 
 	//these are all used in the finite difference approxiamtion to solve the differential equation
-  const gpu_fp dx = 1.0 / (N-1);//spacing between grid points in the x direction
-  const gpu_fp dy = 1.0 / (N-1);//spacing in the y direction
-  gfs_managed.n = N * N;//sets the grid points to N*N
+  const gpu_fp dx = 1.0 / (N-1); //spacing between grid points in the x direction
+  const gpu_fp dy = 1.0 / (N-1); //spacing in the y direction
+  gfs_managed.n = N * N; //sets the grid points to N*N
   gfs_managed.dx2 = dx * dx;
-  gfs_managed.idx2 = 1.0 / dx / dx;//sets the inverse of the squared spacing between grid points in the x-direction, which is also used in the finite difference approximations.
+  gfs_managed.idx2 = 1.0 / dx / dx; //sets the inverse of the squared spacing between grid points in the x-direction, which is also used in the finite difference approximations.
   gfs_managed.dy2 = dy * dy;
   gfs_managed.idy2 = 1.0 / dy / dy;
 

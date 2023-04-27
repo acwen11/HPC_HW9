@@ -53,10 +53,10 @@ static double l2_error(struct GFS gfs);
 __global__
 void jacobi(struct GFS gfs)
 {
-  int ix = blockIdx.x * blockDim.x + threadIdx.x;
-  int iy = blockIdx.y * blockDim.y + threadIdx.y;
-	// int ix = threadIdx.x;
-	// int iy = threadIdx.y;
+  // int ix = blockIdx.x * blockDim.x + threadIdx.x;
+  // int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  int ix = threadIdx.x;
+  int iy = threadIdx.y;
   // int stride_x = blockDim.x * gridDim.x;
   // int stride_y = blockDim.y * gridDim.y;
   const gpu_fp dx2 = gfs.dx2;
@@ -72,13 +72,10 @@ void jacobi(struct GFS gfs)
 	const int jp1 = i + nx; 
 	const int jm1 = i - nx;
 
-	// gfs.u_new[i] = gfs.src[i]; // Is this func doing anything at all?
-
-	// gfs.u_new[i] =  (0.5 * idx2 * idy2) * (dy2 * (gfs.u[ip1] + gfs.u[im1]) + dx2 * (gfs.u[jp1] + gfs.u[jm1]) - dx2 * dy2 * gfs.src[i]); // Issue with loop?
-
   if ((ix < nx - 1 && ix > 0) && (iy < ny - 1 && iy > 0)) // 2D Boundaries
   {
     gfs.u_new[i] =  (0.5 * idx2 * idy2) * (dy2 * (gfs.u[ip1] + gfs.u[im1]) + dx2 * (gfs.u[jp1] + gfs.u[jm1]) - dx2 * dy2 * gfs.src[i]);
+    // gfs.u_new[i] =  (0.5) * (idx2 * (gfs.u[ip1] + gfs.u[im1]) + idy2 * (gfs.u[jp1] + gfs.u[jm1]) - gfs.src[i]);
   }
 }	
 
@@ -86,8 +83,10 @@ void jacobi(struct GFS gfs)
 __global__
  void copy (struct GFS gfs)
 {
-  int ix = blockIdx.x * blockDim.x + threadIdx.x;
-  int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  // int ix = blockIdx.x * blockDim.x + threadIdx.x;
+  // int iy = blockIdx.y * blockDim.y + threadIdx.y;
+  int ix = threadIdx.x;
+  int iy = threadIdx.y;
   const int nx = gfs.nx;
   const int ny = gfs.ny; 
  
@@ -139,11 +138,12 @@ static double l2_error(struct GFS gfs)
 
 int main(int argc, char **argv)
 {
-  const int N = 1<<8;
+  // const int N = 1<<8;
+  const int N = 16;
 
   struct GFS gfs_managed;
 
- // const gpu_fp t_final = atof(argv[1]);
+  // const gpu_fp t_final = atof(argv[1]);
 
   CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u), N*N*sizeof(gpu_fp)));
   CUDA_CHECK(cudaMallocManaged(&(gfs_managed.u_new), N*N*sizeof(gpu_fp)));
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
   gfs_managed.dy2 = dy * dy;
   gfs_managed.idy2 = 1.0 / dy / dy;
 
-  //initialize x and y arrays on the host 
+  // Working: initialize x and y arrays on the host 
 	for (int j = 0; j < N; j++) {
 		for (int i = 0; i < N; i++) {
 			const gpu_fp x = i * dx;
@@ -190,13 +190,32 @@ int main(int argc, char **argv)
     {
       jacobi <<<numBlocks, blockSize>>> (gfs_managed);
 			// Debug output ////////////////
-			for (int i = 0; i < N*N; i++)
-			{
-				printf("Unew set to be %20.16e\n", gfs_managed.u_new[i]); 
-				printf("using src of  %20.16e\n", gfs_managed.src[i]); 
+			// for (int i = 0; i < N*N; i++)
+			// {
+			// 	printf("Unew set to be %20.16e\n", gfs_managed.u_new[i]); 
+			// 	printf("at idx %d using src of  %20.16e\n", i, gfs_managed.src[i]); 
+			// }
+
+			for (int jj = 1; jj < N-1; jj++) {
+				for (int ii = 1; ii < N-1; ii++) {
+					int i = jj * N + ii;
+					int ip1 = i + 1;
+					int im1 = i - 1;	
+					int jp1 = i + N;
+					int jm1 = i - N;
+					double manual_calc =  (0.5 * gfs_managed.idx2 * gfs_managed.idy2) * (gfs_managed.dy2 * (gfs_managed.u[ip1] + gfs_managed.u[im1]) + gfs_managed.dx2 * (gfs_managed.u[jp1] + gfs_managed.u[jm1]) - gfs_managed.dx2 * gfs_managed.dy2 * gfs_managed.src[i]);
+					printf("Unew - manual = %20.16e - %20.16e = %20.16e at idx %d\n", gfs_managed.u_new[i], manual_calc, gfs_managed.u_new[i] - manual_calc, i); 
+				}
 			}
+
 			///////////////////////////////
       copy <<<numBlocks, blockSize>>> (gfs_managed);
+			// Debug output ////////////////
+			for (int i = 0; i < N*N; i++)
+			{
+				printf("Unew - U = %20.16e - %20.16e = %20.16e at idx %d\n", gfs_managed.u_new[i], gfs_managed.u[i], gfs_managed.u_new[i] - gfs_managed.u[i], i); 
+			}
+			///////////////////////////////
     }
     error_check <<<numBlocks, blockSize>>> (gfs_managed);
 		// // Debug output ////////////////
